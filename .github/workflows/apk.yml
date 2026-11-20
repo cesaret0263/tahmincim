@@ -32,9 +32,11 @@ jobs:
           npx --yes create-expo-app@latest app --template blank --yes --no-install
           cp -r "$SRC"/. app/
           cd app
+          rm -f metro.config.js
           sed -i 's/ca-app-pub-3940256099942544~3347511713/ca-app-pub-5362848282204358~9870203774/' app.json
           npm install
           npx expo install @expo/vector-icons expo-status-bar firebase @react-native-async-storage/async-storage react-native-safe-area-context expo-image-picker expo-image-manipulator react-native-google-mobile-ads
+          npx expo export --platform android --output-dir /tmp/kontrol
           npx expo prebuild -p android --clean
       - name: APK derle
         run: |
