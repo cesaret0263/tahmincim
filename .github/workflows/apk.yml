@@ -20,7 +20,6 @@ jobs:
           java-version: 17
       - name: Projeyi hazirla
         run: |
-          ls -la
           ZIP=$(find . -maxdepth 2 -name '*.zip' | head -n 1)
           echo "Bulunan zip: $ZIP"
           mkdir -p paket
@@ -28,16 +27,42 @@ jobs:
           APPJS=$(find paket . -name App.js -not -path '*/node_modules/*' | head -n 1)
           test -n "$APPJS" || { echo "Proje dosyalari bulunamadi"; exit 1; }
           SRC=$(dirname "$APPJS")
-          echo "Proje klasoru: $SRC"
           npx --yes create-expo-app@latest app --template blank --yes --no-install
           cp -r "$SRC"/. app/
           cd app
           rm -f metro.config.js
           sed -i 's/ca-app-pub-3940256099942544~3347511713/ca-app-pub-5362848282204358~9870203774/' app.json
+          cat > index.js <<'EOF'
+          import React from 'react';
+          import { registerRootComponent } from 'expo';
+          import { ScrollView, Text } from 'react-native';
+          function HataEkrani({ e }) {
+            const msg = String((e && (e.stack || e.message)) || e);
+            return React.createElement(ScrollView, { style: { flex: 1, backgroundColor: '#fff' }, contentContainerStyle: { padding: 24, paddingTop: 70 } },
+              React.createElement(Text, { style: { fontSize: 18, fontWeight: '700', marginBottom: 12 } }, 'Uygulama hatasi (ekran goruntusu al):'),
+              React.createElement(Text, { selectable: true, style: { fontSize: 13 } }, msg.slice(0, 3000)));
+          }
+          let App;
+          let startError = null;
+          try { App = require('./App').default; } catch (e) { startError = e; }
+          class Koruma extends React.Component {
+            constructor(p) { super(p); this.state = { e: startError }; }
+            static getDerivedStateFromError(e) { return { e }; }
+            render() { return this.state.e ? React.createElement(HataEkrani, { e: this.state.e }) : React.createElement(App); }
+          }
+          registerRootComponent(Koruma);
+          EOF
           npm install
           npx expo install @expo/vector-icons expo-status-bar firebase @react-native-async-storage/async-storage react-native-safe-area-context expo-image-picker expo-image-manipulator react-native-google-mobile-ads
           npx expo export --platform android --output-dir /tmp/kontrol
           npx expo prebuild -p android --clean
+          M=android/app/src/main/AndroidManifest.xml
+          grep -q "gms.ads.APPLICATION_ID" "$M" || sed -i 's#</application>#<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-5362848282204358~9870203774"/></application>#' "$M"
+          echo "---- Reklam kimligi kontrol ----"
+          grep -n "gms.ads.APPLICATION_ID" "$M"
+          printf '\n-keep class androidx.work.** { *; }\n-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class androidx.room.** { *; }\n' >> android/app/proguard-rules.pro
+          printf '\nandroid.enableProguardInReleaseBuilds=false\nandroid.enableMinifyInReleaseBuilds=false\nandroid.enableShrinkResourcesInReleaseBuilds=false\n' >> android/gradle.properties
+          tail -n 4 android/gradle.properties
       - name: APK derle
         run: |
           cd app/android
