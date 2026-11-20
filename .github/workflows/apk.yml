@@ -1,0 +1,41 @@
+name: APK olustur
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CI: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Projeyi hazirla
+        run: |
+          test -f tahmincim.zip || { echo "tahmincim.zip yuklenmemis"; exit 1; }
+          npx --yes create-expo-app@latest app --template blank --yes --no-install
+          unzip -q -o tahmincim.zip -d paket
+          cp -r paket/tahmincim/. app/
+          cd app
+          npm install
+          npx expo install firebase @react-native-async-storage/async-storage react-native-safe-area-context expo-image-picker expo-image-manipulator react-native-google-mobile-ads
+          npx expo prebuild -p android --clean
+      - name: APK derle
+        run: |
+          cd app/android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon -Dorg.gradle.jvmargs=-Xmx4g
+      - name: APK'yi yayinla
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Tahmincim APK ${{ github.run_number }}
+          files: app/android/app/build/outputs/apk/release/app-release.apk
