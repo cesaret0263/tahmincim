@@ -20,18 +20,22 @@ jobs:
           java-version: 17
       - name: Projeyi hazirla
         run: |
-          ZIP=$(find . -maxdepth 2 -name '*.zip' | head -n 1)
-          echo "Bulunan zip: $ZIP"
+          ZIP=$(find . -maxdepth 2 -name '*-v*.zip' | sort -V | tail -n 1)
+          [ -n "$ZIP" ] || ZIP=$(find . -maxdepth 2 -name '*.zip' | head -n 1)
+          echo "Kullanilan zip: $ZIP"
           mkdir -p paket
           if [ -n "$ZIP" ]; then unzip -q -o "$ZIP" -d paket; fi
           APPJS=$(find paket . -name App.js -not -path '*/node_modules/*' | head -n 1)
           test -n "$APPJS" || { echo "Proje dosyalari bulunamadi"; exit 1; }
           SRC=$(dirname "$APPJS")
+          GS=$(find . -maxdepth 1 -name google-services.json | head -n 1)
           npx --yes create-expo-app@latest app --template blank --yes --no-install
           cp -r "$SRC"/. app/
+          if [ -n "$GS" ]; then cp "$GS" app/google-services.json; fi
           cd app
           rm -f metro.config.js
           sed -i 's/ca-app-pub-3940256099942544~3347511713/ca-app-pub-5362848282204358~9870203774/' app.json
+          if [ -f google-services.json ]; then node -e "const f='app.json';const j=require('./'+f);j.expo.android.googleServicesFile='./google-services.json';require('fs').writeFileSync(f,JSON.stringify(j,null,2))"; echo "google-services.json eklendi"; fi
           cat > index.js <<'EOF'
           import React from 'react';
           import { registerRootComponent } from 'expo';
@@ -53,16 +57,15 @@ jobs:
           registerRootComponent(Koruma);
           EOF
           npm install
-          npx expo install @expo/vector-icons expo-status-bar firebase @react-native-async-storage/async-storage react-native-safe-area-context expo-image-picker expo-image-manipulator react-native-google-mobile-ads
+          if [ -f paketler.txt ]; then PKGS=$(tr '\n' ' ' < paketler.txt); else PKGS="@expo/vector-icons expo-status-bar firebase @react-native-async-storage/async-storage react-native-safe-area-context expo-image-picker expo-image-manipulator react-native-google-mobile-ads"; fi
+          npx expo install $PKGS
           npx expo export --platform android --output-dir /tmp/kontrol
           npx expo prebuild -p android --clean
           M=android/app/src/main/AndroidManifest.xml
           grep -q "gms.ads.APPLICATION_ID" "$M" || sed -i 's#</application>#<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-5362848282204358~9870203774"/></application>#' "$M"
-          echo "---- Reklam kimligi kontrol ----"
           grep -n "gms.ads.APPLICATION_ID" "$M"
           printf '\n-keep class androidx.work.** { *; }\n-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class androidx.room.** { *; }\n' >> android/app/proguard-rules.pro
           printf '\nandroid.enableProguardInReleaseBuilds=false\nandroid.enableMinifyInReleaseBuilds=false\nandroid.enableShrinkResourcesInReleaseBuilds=false\n' >> android/gradle.properties
-          tail -n 4 android/gradle.properties
       - name: APK derle
         run: |
           cd app/android
