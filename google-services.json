@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "525530723511",
+    "project_id": "canlimac-b1d65",
+    "storage_bucket": "canlimac-b1d65.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:525530723511:android:0cf6dff42b2549a77d0932",
+        "android_client_info": {
+          "package_name": "com.tahmincim.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCq1-hldmCuoL9K7OR9tzrM5dtBApNyJN0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
