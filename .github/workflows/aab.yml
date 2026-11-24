@@ -1,0 +1,111 @@
+name: Play icin AAB olustur
+# Sadece elle calisir: Actions > "Play icin AAB olustur" > Run workflow
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CI: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Gizli anahtarlar var mi?
+        env:
+          KS: ${{ secrets.KEYSTORE_B64 }}
+          KP: ${{ secrets.KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.KEY_ALIAS }}
+          KK: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          [ -n "$KS" ] || { echo "KEYSTORE_B64 eksik"; exit 1; }
+          [ -n "$KP" ] || { echo "KEYSTORE_PASSWORD eksik"; exit 1; }
+          [ -n "$KA" ] || { echo "KEY_ALIAS eksik"; exit 1; }
+          [ -n "$KK" ] || { echo "KEY_PASSWORD eksik"; exit 1; }
+      - name: Projeyi hazirla
+        run: |
+          ZIP=$(find . -maxdepth 2 -name '*-v*.zip' | sort -V | tail -n 1)
+          [ -n "$ZIP" ] || ZIP=$(find . -maxdepth 2 -name '*.zip' | head -n 1)
+          echo "Kullanilan zip: $ZIP"
+          mkdir -p paket
+          if [ -n "$ZIP" ]; then unzip -q -o "$ZIP" -d paket; fi
+          APPJS=$(find paket . -name App.js -not -path '*/node_modules/*' | head -n 1)
+          test -n "$APPJS" || { echo "Proje dosyalari bulunamadi"; exit 1; }
+          SRC=$(dirname "$APPJS")
+          GS=$(find . -maxdepth 1 -name google-services.json | head -n 1)
+          npx --yes create-expo-app@latest app --template blank --yes --no-install
+          cp -r "$SRC"/. app/
+          if [ -n "$GS" ]; then cp "$GS" app/google-services.json; fi
+          cd app
+          rm -f metro.config.js
+          sed -i 's/ca-app-pub-3940256099942544~3347511713/ca-app-pub-5362848282204358~9870203774/' app.json
+          if [ -f google-services.json ]; then node -e "const f='app.json';const j=require('./'+f);j.expo.android.googleServicesFile='./google-services.json';require('fs').writeFileSync(f,JSON.stringify(j,null,2))"; echo "google-services.json eklendi"; fi
+          cat > index.js <<'EOF'
+          import React from 'react';
+          import { registerRootComponent } from 'expo';
+          import { ScrollView, Text } from 'react-native';
+          function HataEkrani({ e }) {
+            const msg = String((e && (e.stack || e.message)) || e);
+            return React.createElement(ScrollView, { style: { flex: 1, backgroundColor: '#fff' }, contentContainerStyle: { padding: 24, paddingTop: 70 } },
+              React.createElement(Text, { style: { fontSize: 18, fontWeight: '700', marginBottom: 12 } }, 'Uygulama hatasi (ekran goruntusu al):'),
+              React.createElement(Text, { selectable: true, style: { fontSize: 13 } }, msg.slice(0, 3000)));
+          }
+          let App;
+          let startError = null;
+          try { App = require('./App').default; } catch (e) { startError = e; }
+          class Koruma extends React.Component {
+            constructor(p) { super(p); this.state = { e: startError }; }
+            static getDerivedStateFromError(e) { return { e }; }
+            render() { return this.state.e ? React.createElement(HataEkrani, { e: this.state.e }) : React.createElement(App); }
+          }
+          registerRootComponent(Koruma);
+          EOF
+          npm install
+          if [ -f paketler.txt ]; then PKGS=$(tr '\n' ' ' < paketler.txt); else PKGS="@expo/vector-icons expo-status-bar firebase @react-native-async-storage/async-storage react-native-safe-area-context expo-image-picker expo-image-manipulator react-native-google-mobile-ads"; fi
+          npx expo install $PKGS
+          npx expo export --platform android --output-dir /tmp/kontrol
+          npx expo prebuild -p android --clean
+          M=android/app/src/main/AndroidManifest.xml
+          grep -q "gms.ads.APPLICATION_ID" "$M" || sed -i 's#</application>#<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-5362848282204358~9870203774"/></application>#' "$M"
+          grep -n "gms.ads.APPLICATION_ID" "$M"
+          printf '\n-keep class androidx.work.** { *; }\n-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class androidx.room.** { *; }\n' >> android/app/proguard-rules.pro
+          printf '\nandroid.enableProguardInReleaseBuilds=false\nandroid.enableMinifyInReleaseBuilds=false\nandroid.enableShrinkResourcesInReleaseBuilds=false\n' >> android/gradle.properties
+      - name: Yukleme anahtariyla imzala
+        env:
+          KS: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          echo "$KS" | tr -d ' \n\r' | base64 -d > app/android/app/upload.jks
+          ls -l app/android/app/upload.jks
+          cd app/android/app
+          node -e "
+          const fs=require('fs');let g=fs.readFileSync('build.gradle','utf8');
+          const rel='release { storeFile file(\'upload.jks\'); storePassword System.getenv(\'KP\'); keyAlias System.getenv(\'KA\'); keyPassword System.getenv(\'KK\') }';
+          g=g.replace(/signingConfigs\s*\{/, 'signingConfigs {\n        '+rel);
+          const i=g.indexOf('buildTypes');const j=g.indexOf('release',i);
+          const k=g.indexOf('signingConfig signingConfigs.debug',j);
+          if(i<0||j<0||k<0){console.error('build.gradle beklenen yapida degil');process.exit(1);}
+          g=g.slice(0,k)+'signingConfig signingConfigs.release'+g.slice(k+'signingConfig signingConfigs.debug'.length);
+          fs.writeFileSync('build.gradle',g);console.log('imza ayari eklendi');"
+          grep -n "signingConfig" build.gradle
+      - name: AAB derle
+        env:
+          KP: ${{ secrets.KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.KEY_ALIAS }}
+          KK: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          cd app/android
+          chmod +x gradlew
+          ./gradlew bundleRelease --no-daemon -Dorg.gradle.jvmargs=-Xmx4g
+          ls -l app/build/outputs/bundle/release/
+      - name: AAB dosyasini sakla (herkese acik degil)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tahmincim-aab
+          path: app/android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 30
+          
